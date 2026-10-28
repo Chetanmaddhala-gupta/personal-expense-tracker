@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Personal Expense Tracker</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 850px; margin: 36px auto; padding: 0 18px; color: #20242a; }
+    h1 { margin-bottom: 6px; }
+    .hint { color: #59636e; margin-top: 0; }
+    form { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; margin: 20px 0; }
+    input, button { font: inherit; padding: 10px; }
+    input { min-width: 0; border: 1px solid #b9c1c9; border-radius: 5px; }
+    button { border: 0; border-radius: 5px; background: #1769aa; color: white; cursor: pointer; }
+    button:hover { background: #0e5389; }
+    .delete { background: #b42318; padding: 7px 10px; }
+    .delete:hover { background: #8e1b13; }
+    #message { min-height: 1.4em; color: #176c3a; }
+    #message.error { color: #b42318; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { text-align: left; border-bottom: 1px solid #dce1e5; padding: 11px 8px; }
+    th { background: #f3f6f8; }
+    #total { font-weight: bold; margin-top: 16px; }
+    @media (max-width: 650px) { form { grid-template-columns: 1fr; } table { font-size: 14px; } th, td { padding: 8px 4px; } }
+  </style>
+</head>
+<body>
+  <h1>Personal Expense Tracker</h1>
+  <p class="hint">Add an expense, or enter its ID below to update or delete it.</p>
+
+  <h2>Add expense</h2>
+  <form id="add-form">
+    <input id="description" type="text" placeholder="Description (e.g., Lunch)" required>
+    <input id="amount" type="number" min="0.01" step="0.01" placeholder="Amount" required>
+    <input id="category" type="text" placeholder="Category (e.g., Food)" required>
+    <button type="submit">Add expense</button>
+  </form>
+
+  <h2>Update expense</h2>
+  <form id="update-form">
+    <input id="update-id" type="number" min="1" placeholder="Expense ID" required>
+    <input id="update-description" type="text" placeholder="New description" required>
+    <input id="update-amount" type="number" min="0.01" step="0.01" placeholder="New amount" required>
+    <input id="update-category" type="text" placeholder="New category" required>
+    <button type="submit">Update expense</button>
+  </form>
+
+  <h2>Delete expense by ID</h2>
+  <form id="delete-form" style="grid-template-columns: 1fr auto; max-width: 360px;">
+    <input id="delete-id" type="number" min="1" placeholder="Expense ID" required>
+    <button class="delete" type="submit">Delete expense</button>
+  </form>
+
+  <p id="message" role="status" aria-live="polite"></p>
+  <h2>Expenses</h2>
+  <table>
+    <thead><tr><th>ID</th><th>Description</th><th>Amount</th><th>Category</th><th>Action</th></tr></thead>
+    <tbody id="expense-list"></tbody>
+  </table>
+  <p id="total">Total spent: 0.00</p>
+
+  <script>
+    const apiUrl = "/api/expenses";
+    const message = document.getElementById("message");
+
+    function showMessage(text, isError = false) {
+      message.textContent = text;
+      message.classList.toggle("error", isError);
+    }
+
+    async function loadExpenses() {
+      try {
+        const response = await fetch(apiUrl);
+        const expenses = await response.json();
+        const list = document.getElementById("expense-list");
+        list.replaceChildren();
+        let total = 0;
+
+        expenses.forEach((expense) => {
+          total += Number(expense.amount);
+          const row = document.createElement("tr");
+          [expense.id, expense.description, Number(expense.amount).toFixed(2), expense.category].forEach((value) => {
+            const cell = document.createElement("td");
+            cell.textContent = value;
+            row.appendChild(cell);
+          });
+          const actionCell = document.createElement("td");
+          const deleteButton = document.createElement("button");
+          deleteButton.type = "button";
+          deleteButton.className = "delete";
+          deleteButton.textContent = "Delete";
+          deleteButton.addEventListener("click", () => deleteExpense(expense.id));
+          actionCell.appendChild(deleteButton);
+          row.appendChild(actionCell);
+          list.appendChild(row);
+        });
+        document.getElementById("total").textContent = `Total spent: ${total.toFixed(2)}`;
+      } catch (error) {
+        showMessage("Could not load expenses. Is the API running?", true);
+      }
+    }
+
+    document.getElementById("add-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const description = document.getElementById("description").value.trim();
+      const amount = Number(document.getElementById("amount").value);
+      const category = document.getElementById("category").value.trim();
+      if (!description || !category || !Number.isFinite(amount) || amount <= 0) {
+        showMessage("Enter a description, category, and amount greater than zero.", true);
+        return;
+      }
+      try {
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ description, amount, category }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "Could not add expense.");
+        showMessage(result.message);
+        event.target.reset();
+        await loadExpenses();
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    });
+
+    document.getElementById("update-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const id = Number(document.getElementById("update-id").value);
+      const description = document.getElementById("update-description").value.trim();
+      const amount = Number(document.getElementById("update-amount").value);
+      const category = document.getElementById("update-category").value.trim();
+      if (!Number.isInteger(id) || id <= 0 || !description || !category || !Number.isFinite(amount) || amount <= 0) {
+        showMessage("Enter a valid ID, description, category, and amount greater than zero.", true);
+        return;
+      }
+      try {
+        const response = await fetch(`${apiUrl}/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ description, amount, category }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "Could not update expense.");
+        showMessage(result.message);
+        event.target.reset();
+        await loadExpenses();
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    });
+
+    document.getElementById("delete-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const id = Number(document.getElementById("delete-id").value);
+      if (!Number.isInteger(id) || id <= 0) {
+        showMessage("Enter a valid expense ID.", true);
+        return;
+      }
+      await deleteExpense(id);
+      event.target.reset();
+    });
+
+    async function deleteExpense(id) {
+      try {
+        const response = await fetch(`${apiUrl}/${id}`, { method: "DELETE" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "Could not delete expense.");
+        showMessage(result.message);
+        await loadExpenses();
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    }
+
+    loadExpenses();
+  </script>
+</body>
+</html>
